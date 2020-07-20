@@ -23,7 +23,7 @@ export default function (core, change) {
         editor.wysiwyg.innerHTML = item.contents;
 
         core.setRange(util.getNodeFromPath(item.s.path, editor.wysiwyg), item.s.offset, util.getNodeFromPath(item.e.path, editor.wysiwyg), item.e.offset);
-        core.focus();
+        core.selection.focus();
 
         if (stackIndex === 0) {
             if (undo) undo.setAttribute('disabled', true);

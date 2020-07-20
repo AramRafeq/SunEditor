@@ -12,6 +12,7 @@ import _Context from './context';
 import _history from './history';
 import _util from './util';
 import _notice from '../plugins/modules/_notice';
+import Selection from './core/selection';
 
 /**
  * @description SunEditor constuctor function.
@@ -121,7 +122,7 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
         lang: lang,
 
         /**
-         * @description The selection node (core.getSelectionNode()) to which the effect was last applied
+         * @description The selection node (core.selection.getSelectionNode()) to which the effect was last applied
          */
         effectNode: null,
 
@@ -740,248 +741,13 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
         },
 
         /**
-         * @description Focus to wysiwyg area using "native focus function"
-         */
-        nativeFocus: function () {
-            const caption = util.getParentElement(this.getSelectionNode(), 'figcaption');
-            if (caption) {
-                caption.focus();
-            } else {
-                context.element.wysiwyg.focus();
-            }
-
-            this._editorRange();
-        },
-
-        /**
-         * @description Focus to wysiwyg area
-         */
-        focus: function () {
-            if (context.element.wysiwygFrame.style.display === 'none') return;
-
-            if (options.iframe) {
-                this.nativeFocus();
-            } else {
-                try {
-                    const range = this.getRange();
-
-                    if (range.startContainer === range.endContainer && util.isWysiwygDiv(range.startContainer)) {
-                        const format = util.createElement('P');
-                        const br = util.createElement('BR');
-                        format.appendChild(br);
-                        context.element.wysiwyg.appendChild(format);
-                        this.setRange(br, 0, br, 0);
-                    } else {
-                        this.setRange(range.startContainer, range.startOffset, range.endContainer, range.endOffset);
-                    }
-                } catch (e) {
-                    this.nativeFocus();
-                }
-            }
-
-            event._applyTagEffects();
-            if (this._isBalloon) event._toggleToolbarBalloon();
-        },
-
-        /**
-         * @description If "focusEl" is a component, then that component is selected; if it is a format element, the last text is selected
-         * If "focusEdge" is null, then selected last element
-         * @param {Element|null} focusEl Focus element
-         */
-        focusEdge: function (focusEl) {
-            if (!focusEl) focusEl = context.element.wysiwyg.lastElementChild;
-
-            const fileComponentInfo = this.getFileComponent(focusEl);
-            if (fileComponentInfo) {
-                this.selectComponent(fileComponentInfo.target, fileComponentInfo.pluginName);
-            } else if (focusEl) {
-                focusEl = util.getChildElement(focusEl, function (current) { return current.childNodes.length === 0 || current.nodeType === 3; }, true);
-                if (!focusEl) this.nativeFocus();
-                else this.setRange(focusEl, focusEl.textContent.length, focusEl, focusEl.textContent.length);
-            } else {
-                this.focus();
-            }
-        },
-
-        /**
-         * @description Set current editor's range object
-         * @param {Node} startCon The startContainer property of the selection object.
-         * @param {Number} startOff The startOffset property of the selection object.
-         * @param {Node} endCon The endContainer property of the selection object.
-         * @param {Number} endOff The endOffset property of the selection object.
-         */
-        setRange: function (startCon, startOff, endCon, endOff) {
-            if (!startCon || !endCon) return;
-            if (startOff > startCon.textContent.length) startOff = startCon.textContent.length;
-            if (endOff > endCon.textContent.length) endOff = endCon.textContent.length;
-            
-            const range = this._wd.createRange();
-
-            try {
-                range.setStart(startCon, startOff);
-                range.setEnd(endCon, endOff);
-            } catch (error) {
-                console.warn('[SUNEDITOR.core.focus.error] ' + error);
-                this.nativeFocus();
-                return;
-            }
-
-            const selection = this.getSelection();
-
-            if (selection.removeAllRanges) {
-                selection.removeAllRanges();
-            }
-
-            selection.addRange(range);
-            this._editorRange();
-            if (options.iframe) this.nativeFocus();
-        },
-
-        /**
-         * @description Remove range object and button effect
-         */
-        removeRange: function () {
-            this._variable._range = null;
-            this._variable._selectionNode = null;
-            this.getSelection().removeAllRanges();
-
-            const commandMap = this.commandMap;
-            const activePlugins = this.activePlugins;
-            for (let key in commandMap) {
-                if (!util.hasOwn(commandMap, key)) continue;
-                if (activePlugins.indexOf(key) > -1) {
-                    plugins[key].active.call(this, null);
-                } else if (commandMap.OUTDENT && /^OUTDENT$/i.test(key)) {
-                    commandMap.OUTDENT.setAttribute('disabled', true);
-                } else if (commandMap.INDENT && /^INDENT$/i.test(key)) {
-                    commandMap.INDENT.removeAttribute('disabled');
-                } else {
-                    util.removeClass(commandMap[key], 'active');
-                }
-            }
-        },
-
-        /**
-         * @description Get current editor's range object
-         * @returns {Object}
-         */
-        getRange: function () {
-            return this._variable._range || this._createDefaultRange();
-        },
-
-        /**
-         * @description If the "range" object is a non-editable area, add a line at the top of the editor and update the "range" object.
-         * Returns a new "range" or argument "range".
-         * @param {Object} range core.getRange()
-         * @returns {Object} range
-         */
-        getRange_addLine: function (range) {
-            if (this._selectionVoid(range)) {
-                const wysiwyg = context.element.wysiwyg;
-                const op = util.createElement('P');
-                op.innerHTML = '<br>';
-                wysiwyg.insertBefore(op, wysiwyg.firstElementChild);
-                this.setRange(op.firstElementChild, 0, op.firstElementChild, 1);
-                range = this._variable._range;
-            }
-            return range;
-        },
-
-        /**
-         * @description Get window selection obejct
-         * @returns {Object}
-         */
-        getSelection: function () {
-            return this._shadowRoot && this._shadowRoot.getSelection ? this._shadowRoot.getSelection() : this._ww.getSelection();
-        },
-
-        /**
-         * @description Get current select node
-         * @returns {Node}
-         */
-        getSelectionNode: function () {
-            if (util.isWysiwygDiv(this._variable._selectionNode)) this._editorRange();
-            if (!this._variable._selectionNode) {
-                const selectionNode = util.getChildElement(context.element.wysiwyg.firstChild, function (current) { return current.childNodes.length === 0 || current.nodeType === 3; }, false);
-                if (!selectionNode) {
-                    this._editorRange();
-                } else {
-                    this._variable._selectionNode = selectionNode;
-                    return selectionNode;
-                }
-            }
-            return this._variable._selectionNode;
-        },
-
-        /**
-         * @description Saving the range object and the currently selected node of editor
-         * @private
-         */
-        _editorRange: function () {
-            const selection = this.getSelection();
-            if (!selection) return null;
-            let range = null;
-            let selectionNode = null;
-
-            if (selection.rangeCount > 0) {
-                range = selection.getRangeAt(0);
-            } else {
-                range = this._createDefaultRange();
-            }
-
-            this._variable._range = range;
-
-            if (range.collapsed) {
-                selectionNode = range.commonAncestorContainer;
-            } else {
-                selectionNode = selection.extentNode || selection.anchorNode;
-            }
-
-            this._variable._selectionNode = selectionNode;
-        },
-
-        /**
-         * @description Return the range object of editor's first child node
-         * @returns {Object}
-         * @private
-         */
-        _createDefaultRange: function () {
-            const wysiwyg = context.element.wysiwyg;
-            wysiwyg.focus();
-            const range = this._wd.createRange();
-
-            let focusEl = wysiwyg.firstElementChild;
-            if (!focusEl) {
-                focusEl = util.createElement('P');
-                focusEl.innerHTML = '<br>';
-                wysiwyg.appendChild(focusEl);
-            }
-
-            range.setStart(focusEl, 0);
-            range.setEnd(focusEl, 0);
-            
-            return range;
-        },
-
-        /**
-         * @description Returns true if there is no valid "selection".
-         * @param {Object} range core.getRange()
-         * @returns {Object} range
-         * @private
-         */
-        _selectionVoid: function (range) {
-            const comm = range.commonAncestorContainer;
-            return (util.isWysiwygDiv(range.startContainer) && util.isWysiwygDiv(range.endContainer)) || /FIGURE/i.test(comm.nodeName) || this._fileManager.regExp.test(comm.nodeName) || util.isMediaComponent(comm);
-        },
-
-        /**
          * @description Reset range object to text node selected status.
          * @returns {Boolean} Returns false if there is no valid selection.
          * @private
          */
         _resetRangeToTextNode: function () {
-            const range = this.getRange();
-            if (this._selectionVoid(range)) return false;
+            const range = this.selection.getRange();
+            if (this.selection._selectionVoid(range)) return false;
             
             let startCon = range.startContainer;
             let startOff = range.startOffset;
@@ -1073,7 +839,7 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
             endOff = tempOffset;
 
             // set Range
-            this.setRange(startCon, startOff, endCon, endOff);
+            this.selection.setRange(startCon, startOff, endCon, endOff);
             return true;
         },
 
@@ -1084,14 +850,14 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
          */
         getSelectedElements: function (validation) {
             if (!this._resetRangeToTextNode()) return [];
-            let range = this.getRange();
+            let range = this.selection.getRange();
 
             if (util.isWysiwygDiv(range.startContainer)) {
                 const children = context.element.wysiwyg.children;
                 if (children.length === 0) return [];
 
-                this.setRange(children[0], 0, children[children.length - 1], children[children.length - 1].textContent.trim().length);
-                range = this.getRange();
+                this.selection.setRange(children[0], 0, children[children.length - 1], children[children.length - 1].textContent.trim().length);
+                range = this.selection.getRange();
             }
 
             const startCon = range.startContainer;
@@ -1148,7 +914,7 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
          * @returns {Array}
          */
         getSelectedElementsAndComponents: function (removeDuplicate) {
-            const commonCon = this.getRange().commonAncestorContainer;
+            const commonCon = this.selection.getRange().commonAncestorContainer;
             const myComponent = util.getParentElement(commonCon, util.isComponent);
             const selectedLines = util.isTable(commonCon) ? 
                 this.getSelectedElements(null) :
@@ -1175,7 +941,7 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
         /**
          * @description Determine if this offset is the edge offset of container
          * @param {Node} container The node of the selection object. (range.startContainer..)
-         * @param {Number} offset The offset of the selection object. (core.getRange().startOffset...)
+         * @param {Number} offset The offset of the selection object. (core.selection.getRange().startOffset...)
          * @returns {Boolean}
          */
         isEdgePoint: function (container, offset) {
@@ -1205,7 +971,7 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
          * @returns {Element}
          */
         appendFormatTag: function (element, formatNode) {
-            const currentFormatEl = util.getFormatElement(this.getSelectionNode(), null);
+            const currentFormatEl = util.getFormatElement(this.selection.getSelectionNode(), null);
             const oFormatName = formatNode ? (typeof formatNode === 'string' ? formatNode : formatNode.nodeName) : (util.isFormatElement(currentFormatEl) && !util.isFreeFormatElement(currentFormatEl)) ? currentFormatEl.nodeName : 'P';
             const oFormat = util.createElement(oFormatName);
             oFormat.innerHTML = '<br>';
@@ -1233,17 +999,17 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
                 return null;
             }
 
-            this.getRange_addLine(this.getRange());
+            this.selection.getRange_addLine(this.selection.getRange());
             const r = this.removeNode();
             let oNode = null;
-            let selectionNode = this.getSelectionNode();
+            let selectionNode = this.selection.getSelectionNode();
             let formatEl = util.getFormatElement(selectionNode, null);
 
             if (util.isListCell(formatEl)) {
                 this.insertNode(element, selectionNode === formatEl ? null : r.container.nextSibling, false);
                 if (!element.nextSibling) element.parentNode.appendChild(util.createElement('BR'));
             } else {
-                if (this.getRange().collapsed && (r.container.nodeType === 3 || util.isBreak(r.container))) {
+                if (this.selection.getRange().collapsed && (r.container.nodeType === 3 || util.isBreak(r.container))) {
                     const depthFormat = util.getParentElement(r.container, function (current) { return this.isRangeFormatElement(current); }.bind(util));
                     oNode = util.splitElement(r.container, r.offset, !depthFormat ? 0 : util.getElementDepth(depthFormat) + 1);
                     if (oNode) formatEl = oNode.previousSibling;
@@ -1257,7 +1023,7 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
                 this.selectComponent(fileComponentInfo.target, fileComponentInfo.pluginName);
             } else if (oNode) {
                 oNode = util.getEdgeChildNodes(oNode, null).sc || oNode;
-                this.setRange(oNode, 0, oNode, 0);
+                this.selection.setRange(oNode, 0, oNode, 0);
             }
 
             // history stack
@@ -1303,7 +1069,7 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
          * @param {String} pluginName Plugin name (image, video)
          */
         selectComponent: function (element, pluginName) {
-            if (!this.hasFocus) this.focus();
+            if (!this.hasFocus) this.selection.focus();
             const plugin = this.plugins[pluginName];
             if (!plugin) return;
             _w.setTimeout(function () {
@@ -1382,7 +1148,7 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
                 }
             }
 
-            const range = (!afterNode && !isComp) ? this.getRange_addLine(this.getRange()) : this.getRange();
+            const range = (!afterNode && !isComp) ? this.selection.getRange_addLine(this.selection.getRange()) : this.selection.getRange();
             const startCon = range.startContainer;
             const startOff = range.startOffset;
             const endCon = range.endContainer;
@@ -1543,7 +1309,7 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
                         }
                     }
     
-                    this.setRange(oNode, offset, oNode, offset);
+                    this.selection.setRange(oNode, offset, oNode, offset);
                 }
 
                 // history stack
@@ -1559,7 +1325,7 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
          * @returns {Object}
          */
         removeNode: function () {
-            const range = this.getRange();
+            const range = this.selection.getRange();
             let container, offset = 0;
             let startCon = range.startContainer;
             let endCon = range.endContainer;
@@ -1691,7 +1457,7 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
             }
 
             // set range
-            this.setRange(container, offset, container, offset);
+            this.selection.setRange(container, offset, container, offset);
             // history stack
             this.history.push(true);
 
@@ -1707,7 +1473,7 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
          * @param {Element} rangeElement Element of wrap the arguments (BLOCKQUOTE...)
          */
         applyRangeFormatElement: function (rangeElement) {
-            this.getRange_addLine(this.getRange());
+            this.selection.getRange_addLine(this.selection.getRange());
             const rangeLines = this.getSelectedElementsAndComponents(false);
             if (!rangeLines || rangeLines.length === 0) return;
 
@@ -1864,9 +1630,9 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
 
             const edge = util.getEdgeChildNodes(rangeElement.firstElementChild, rangeElement.lastElementChild);
             if (rangeLines.length > 1) {
-                this.setRange(edge.sc, 0, edge.ec, edge.ec.textContent.length);
+                this.selection.setRange(edge.sc, 0, edge.ec, edge.ec.textContent.length);
             } else {
-                this.setRange(edge.ec, edge.ec.textContent.length, edge.ec, edge.ec.textContent.length);
+                this.selection.setRange(edge.ec, edge.ec.textContent.length, edge.ec, edge.ec.textContent.length);
             }
 
             // history stack
@@ -1885,7 +1651,7 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
          * @returns {Object}
          */
         detachRangeFormatElement: function (rangeElement, selectedFormats, newRangeElement, remove, notHistoryPush) {
-            const range = this.getRange();
+            const range = this.selection.getRange();
             const so = range.startOffset;
             const eo = range.endOffset;
 
@@ -2090,9 +1856,9 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
             
             if (!remove && edge) {
                 if (!selectedFormats) {
-                    this.setRange(edge.sc, 0, edge.sc, 0);
+                    this.selection.setRange(edge.sc, 0, edge.sc, 0);
                 } else {
-                    this.setRange(edge.sc, so, edge.ec, eo);
+                    this.selection.setRange(edge.sc, so, edge.ec, eo);
                 }
             }
 
@@ -2180,7 +1946,7 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
          * @param {Boolean|null} strictRemove If true, only nodes with all styles and classes removed from the nodes of "removeNodeArray" are removed.
          */
         nodeChange: function (appendNode, styleArray, removeNodeArray, strictRemove) {
-            let range = this.getRange_addLine(this.getRange());
+            let range = this.selection.getRange_addLine(this.selection.getRange());
             styleArray = styleArray && styleArray.length > 0 ? styleArray : false;
             removeNodeArray = removeNodeArray && removeNodeArray.length > 0 ? removeNodeArray : false;
             
@@ -2210,9 +1976,9 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
 
                     const zeroWidth = util.createTextNode(util.zeroWidthSpace);
                     startCon.insertBefore(zeroWidth, afterNode);
-                    this.setRange(zeroWidth, 1, zeroWidth, 1);
+                    this.selection.setRange(zeroWidth, 1, zeroWidth, 1);
 
-                    range = this.getRange();
+                    range = this.selection.getRange();
                     startCon = range.startContainer;
                     startOff = range.startOffset;
                     endCon = range.endContainer;
@@ -2376,7 +2142,7 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
 
             // get line nodes
             const lineNodes = this.getSelectedElements(null);
-            range = this.getRange();
+            range = this.selection.getRange();
             startCon = range.startContainer;
             startOff = range.startOffset;
             endCon = range.endContainer;
@@ -2449,7 +2215,7 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
 
             // set range
             this.controllersOff();
-            this.setRange(start.container, start.offset, end.container, end.offset);
+            this.selection.setRange(start.container, start.offset, end.container, end.offset);
 
             // history stack
             this.history.push(false);
@@ -3726,7 +3492,7 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
                     const first = util.getChildElement(wysiwyg.firstChild, function (current) { return current.childNodes.length === 0 || current.nodeType === 3; }, false) || wysiwyg.firstChild;
                     const last = util.getChildElement(wysiwyg.lastChild, function (current) { return current.childNodes.length === 0 || current.nodeType === 3; }, true) || wysiwyg.lastChild;
                     if (!first || !last) return;
-                    this.setRange(first, 0, last, last.textContent.length);
+                    this.selection.setRange(first, 0, last, last.textContent.length);
                     break;
                 case 'codeView':
                     this.toggleCodeView();
@@ -3746,7 +3512,7 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
                     break;
                 case 'removeFormat':
                     this.removeFormat();
-                    this.focus();
+                    this.selection.focus();
                     break;
                 case 'print':
                     this.print();
@@ -3783,7 +3549,7 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
                     }
 
                     this.nodeChange(cmd, null, [removeNode], false);
-                    this.focus();
+                    this.selection.focus();
             }
         },
 
@@ -3800,7 +3566,7 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
          * @param {String} command Separator ("indent" or "outdent")
          */
         indent: function (command) {
-            const range = this.getRange();
+            const range = this.selection.getRange();
             const rangeLines = this.getSelectedElements(null);
             const cells = [];
             const shift = 'indent' !== command;
@@ -3833,7 +3599,7 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
             }
 
             this.effectNode = null;
-            this.setRange(sc, so, ec, eo);
+            this.selection.setRange(sc, so, ec, eo);
 
             // history stack
             this.history.push(false);
@@ -3884,7 +3650,7 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
                     }
                 }
 
-                this.nativeFocus();
+                this.selection.nativeFocus();
                 util.removeClass(this._styleCommandMap.codeView, 'active');
 
                 // history stack
@@ -4478,14 +4244,14 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
                 if (count > maxCharCount) {
                     over = true;
                     if (nextCharCount > 0) {
-                        this._editorRange();
-                        const range = this.getRange();
+                        this.selection._editorRange();
+                        const range = this.selection.getRange();
                         const endOff = range.endOffset - 1;
-                        const text = this.getSelectionNode().textContent;
+                        const text = this.selection.getSelectionNode().textContent;
                         const slicePosition = range.endOffset - (count - maxCharCount);
     
-                        this.getSelectionNode().textContent = text.slice(0, slicePosition < 0 ? 0 : slicePosition) + text.slice(range.endOffset, text.length);
-                        this.setRange(range.endContainer, endOff, range.endContainer, endOff);
+                        this.selection.getSelectionNode().textContent = text.slice(0, slicePosition < 0 ? 0 : slicePosition) + text.slice(range.endOffset, text.length);
+                        this.selection.setRange(range.endContainer, endOff, range.endContainer, endOff);
                     }
                 } else if ((count + nextCharCount) > maxCharCount) {
                     over = true;
@@ -4721,6 +4487,9 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
             }
             
             this._initWysiwygArea(reload, _initHTML);
+
+            // @todo
+            this.selection = new Selection(this);
         },
 
         /**
@@ -4815,7 +4584,7 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
         _setDefaultFormat: function (formatName) {
             if (this._fileManager.pluginRegExp.test(this.currentControllerName)) return;
 
-            const range = this.getRange();
+            const range = this.selection.getRange();
             const commonCon = range.commonAncestorContainer;
             const startCon = range.startContainer;
             const rangeEl = util.getRangeFormatElement(commonCon, null);
@@ -4840,7 +4609,7 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
                 }
                 
                 offset = focusNode.textContent.length;
-                this.setRange(focusNode, offset, focusNode, offset);
+                this.selection.setRange(focusNode, offset, focusNode, offset);
                 return;
             }
 
@@ -4853,7 +4622,7 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
                     commonCon.appendChild(br);
                 }
 
-                this.setRange(br, 1, br, 1);
+                this.selection.setRange(br, 1, br, 1);
                 return;
             }
 
@@ -4863,8 +4632,8 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
 
             format = util.getFormatElement(focusNode, null);
             if (!format) {
-                this.removeRange();
-                this._editorRange();
+                this.selection.removeRange();
+                this.selection._editorRange();
                 return;
             }
             
@@ -4877,7 +4646,7 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
             }
 
             this.effectNode = null;
-            this.nativeFocus();
+            this.selection.nativeFocus();
         },
 
         /**
@@ -5037,7 +4806,7 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
         },
 
         _applyTagEffects: function () {
-            let selectionNode = core.getSelectionNode();
+            let selectionNode = core.selection.getSelectionNode();
             if (selectionNode === core.effectNode) return;
             core.effectNode = selectionNode;
 
@@ -5164,8 +4933,8 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
 
             if (!command && !display) return;
             if (target.disabled) return;
-            if (!core.hasFocus) core.nativeFocus();
-            if (!core._variable.isCodeView) core._editorRange();
+            if (!core.hasFocus) core.selection.nativeFocus();
+            if (!core._variable.isCodeView) core.selection._editorRange();
 
             core.actionCall(command, display, target);
         },
@@ -5220,14 +4989,14 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
                 }
             }
 
-            _w.setTimeout(core._editorRange.bind(core));
-            core._editorRange();
+            _w.setTimeout(core.selection._editorRange.bind(core.selection));
+            core.selection._editorRange();
 
-            const selectionNode = core.getSelectionNode();
+            const selectionNode = core.selection.getSelectionNode();
             const formatEl = util.getFormatElement(selectionNode, null);
             const rangeEl = util.getRangeFormatElement(selectionNode, null);
             if ((!formatEl || formatEl === rangeEl) && !util.isNonEditable(targetElement)) {
-                const range = core.getRange();
+                const range = core.selection.getRange();
                 if (util.getFormatElement(range.startContainer) === util.getFormatElement(range.endContainer)) {
                     if (util.isList(rangeEl)) {
                         const oLi = util.createElement('LI');
@@ -5239,7 +5008,7 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
                     }
                     
                     e.preventDefault();
-                    core.focus();
+                    core.selection.focus();
                 }
             } else {
                 event._applyTagEffects();
@@ -5263,8 +5032,8 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
         },
 
         _toggleToolbarBalloon: function () {
-            core._editorRange();
-            const range = core.getRange();
+            core.selection._editorRange();
+            const range = core.selection.getRange();
             if (core._bindControllersOff || (!core._isBalloonAlways && range.collapsed)) event._hideToolbar();
             else event._showToolbarBalloon(range);
         },
@@ -5272,9 +5041,9 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
         _showToolbarBalloon: function (rangeObj) {
             if (!core._isBalloon) return;
 
-            const range = rangeObj || core.getRange();
+            const range = rangeObj || core.selection.getRange();
             const toolbar = context.element.toolbar;
-            const selection = core.getSelection();
+            const selection = core.selection.getSelection();
 
             let isDirTop;
             if (core._isBalloonAlways && range.collapsed) {
@@ -5308,13 +5077,13 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
             toolbar.style.display = 'block';
 
             if (!rects) {
-                const node = core.getSelectionNode();
+                const node = core.selection.getSelectionNode();
                 if (util.isFormatElement(node)) {
                     const zeroWidth = util.createTextNode(util.zeroWidthSpace);
                     core.insertNode(zeroWidth, null, false);
-                    core.setRange(zeroWidth, 1, zeroWidth, 1);
-                    core._editorRange();
-                    rects = core.getRange().getClientRects();
+                    core.selection.setRange(zeroWidth, 1, zeroWidth, 1);
+                    core.selection._editorRange();
+                    rects = core.selection.getRange().getClientRects();
                     rects = rects[isDirTop ? 0 : rects.length - 1];
                 }
 
@@ -5422,7 +5191,7 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
         },
 
         onInput_wysiwyg: function (e) {
-            core._editorRange();
+            core.selection._editorRange();
 
             const data = (e.data === null ? '' : e.data === undefined ? ' ' : e.data) || '';       
             if (!core._charCount(data)) {
@@ -5461,8 +5230,8 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
             }
 
             /** default key action */
-            let selectionNode = core.getSelectionNode();
-            const range = core.getRange();
+            let selectionNode = core.selection.getSelectionNode();
+            const range = core.selection.getRange();
             const selectRange = !range.collapsed || range.startContainer !== range.endContainer;
             const fileComponentName = core._fileManager.pluginRegExp.test(core.currentControllerName) ? core.currentControllerName : '';
             let formatEl = util.getFormatElement(selectionNode, null) || selectionNode;
@@ -5510,7 +5279,7 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
                             while (attrs[0]) {
                                 formatEl.removeAttribute(attrs[0].name);
                             }
-                            core.nativeFocus();
+                            core.selection.nativeFocus();
 
                             return false;
                         }
@@ -5537,7 +5306,7 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
                             selectionNode.textContent = '';
                             util.removeItemAllParents(selectionNode, null, formatEl);
                             offset = typeof offset === 'number' ? offset : prev.nodeType === 3 ? prev.textContent.length : 1;
-                            core.setRange(prev, offset, prev, offset);
+                            core.selection.setRange(prev, offset, prev, offset);
                             break;
                         }
                     }
@@ -5554,7 +5323,7 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
 
                                 core.removeNode();
                                 if (range.startContainer.nodeType === 3) {
-                                    core.setRange(range.startContainer, range.startContainer.textContent.length, range.startContainer, range.startContainer.textContent.length);
+                                    core.selection.setRange(range.startContainer, range.startContainer.textContent.length, range.startContainer, range.startContainer.textContent.length);
                                 }
                                 // history stack
                                 core.history.push(true);
@@ -5589,7 +5358,7 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
                                     util.removeItem(formatEl);
                                     if (rangeEl.children.length === 0) util.removeItem(rangeEl);
 
-                                    core.setRange(con, offset, con, offset);
+                                    core.selection.setRange(con, offset, con, offset);
                                     // history stack
                                     core.history.push(true);
                                 }
@@ -5678,7 +5447,7 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
                                 if (util.isTable(nextEl)) {
                                     let cell = util.getChildElement(nextEl, util.isCell, false);
                                     cell = cell.firstElementChild || cell;
-                                    core.setRange(cell, 0, cell, 0);
+                                    core.selection.setRange(cell, 0, cell, 0);
                                     break;
                                 }
                             }
@@ -5734,7 +5503,7 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
                                 }
                                 util.removeItem(next);
                             }
-                            core.setRange(con, 0, con, 0);
+                            core.selection.setRange(con, 0, con, 0);
                             // history stack
                             core.history.push(true);
                         }
@@ -5749,7 +5518,7 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
 
                     const isEdge = (!range.collapsed || core.isEdgePoint(range.startContainer, range.startOffset));            
                     const selectedFormats = core.getSelectedElements(null);
-                    selectionNode = core.getSelectionNode();
+                    selectionNode = core.selection.getSelectionNode();
                     const cells = [];
                     let lines = [];
                     let fc = util.isListCell(selectedFormats[0]), lc = util.isListCell(selectedFormats[selectedFormats.length - 1]);
@@ -5784,7 +5553,7 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
                             let moveCell = cells[idx];
                             if (!moveCell) break;
                             moveCell = moveCell.firstElementChild || moveCell;
-                            core.setRange(moveCell, 0, moveCell, 0);
+                            core.selection.setRange(moveCell, 0, moveCell, 0);
                             break;
                         }
 
@@ -5863,7 +5632,7 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
                         }
                     }
 
-                    core.setRange(r.sc, r.so, r.ec, r.eo);
+                    core.selection.setRange(r.sc, r.so, r.ec, r.eo);
                     // history stack
                     core.history.push(false);
                     
@@ -5888,7 +5657,7 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
                     if (!shift && freeFormatEl) {
                         e.preventDefault();
                         const selectionFormat = selectionNode === freeFormatEl;
-                        const wSelection = core.getSelection();
+                        const wSelection = core.selection.getSelection();
                         const children = selectionNode.childNodes, offset = wSelection.focusOffset, prev = selectionNode.previousElementSibling, next = selectionNode.nextSibling;
 
                         if (!util.isClosureFreeFormatElement(freeFormatEl) && !!children && ((selectionFormat && range.collapsed && children.length - 1 <= offset + 1 && util.isBreak(children[offset]) && (!children[offset + 1] || ((!children[offset + 2] || util.onlyZeroWidthSpace(children[offset + 2].textContent)) && children[offset + 1].nodeType === 3 && util.onlyZeroWidthSpace(children[offset + 1].textContent))) &&  offset > 0 && util.isBreak(children[offset - 1])) ||
@@ -5897,7 +5666,7 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
                             else util.removeItem(selectionNode);
                             const newEl = core.appendFormatTag(freeFormatEl, util.isFormatElement(freeFormatEl.nextElementSibling) ? freeFormatEl.nextElementSibling : null);
                             util.copyFormatAttributes(newEl, freeFormatEl);
-                            core.setRange(newEl, 1, newEl, 1);
+                            core.selection.setRange(newEl, 1, newEl, 1);
                             break;
                         }
                         
@@ -5910,7 +5679,7 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
                                 focusNode = focusNode.childNodes[wOffset - offset > 1 ? wOffset - 1 : wOffset];
                             }
 
-                            core.setRange(focusNode, 1, focusNode, 1);
+                            core.selection.setRange(focusNode, 1, focusNode, 1);
                         } else {
                             const focusNext = wSelection.focusNode.nextSibling;
                             const br = util.createElement('BR');
@@ -5919,9 +5688,9 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
                             const brPrev = br.previousSibling, brNext = br.nextSibling;
                             if (!util.isBreak(focusNext) && !util.isBreak(brPrev) && (!brNext || util.onlyZeroWidthSpace(brNext))) {
                                 br.parentNode.insertBefore(br.cloneNode(false), br);
-                                core.setRange(br, 1, br, 1);
+                                core.selection.setRange(br, 1, br, 1);
                             } else {
-                                core.setRange(brNext, 0, brNext, 0);
+                                core.selection.setRange(brNext, 0, brNext, 0);
                             }
                         }
 
@@ -5932,7 +5701,7 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
                     if (selectRange) break;
                     
                     if (rangeEl && formatEl && !util.isCell(rangeEl) && !/^FIGCAPTION$/i.test(rangeEl.nodeName)) {
-                        const range = core.getRange();
+                        const range = core.selection.getRange();
                         if(core.isEdgePoint(range.endContainer, range.endOffset) && util.isList(selectionNode.nextSibling)) {
                             e.preventDefault();
                             const newEl = util.createElement('LI');
@@ -5942,7 +5711,7 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
                             formatEl.parentNode.insertBefore(newEl, formatEl.nextElementSibling);
                             newEl.appendChild(selectionNode.nextSibling);
                             
-                            core.setRange(br, 1, br, 1);
+                            core.selection.setRange(br, 1, br, 1);
                             break;
                         }
 
@@ -5969,7 +5738,7 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
                             newEl.innerHTML = '<br>';
                             util.copyFormatAttributes(newEl, formatEl);
                             util.removeItemAllParents(formatEl, null, null);
-                            core.setRange(newEl, 1, newEl, 1);
+                            core.selection.setRange(newEl, 1, newEl, 1);
                             break;
                         }
                     }
@@ -5977,7 +5746,7 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
                     if (rangeEl && util.getParentElement(rangeEl, 'FIGCAPTION') && util.getParentElement(rangeEl, util.isList)) {
                         e.preventDefault();
                         formatEl = core.appendFormatTag(formatEl, null);
-                        core.setRange(formatEl, 0, formatEl, 0);
+                        core.selection.setRange(formatEl, 0, formatEl, 0);
                     }
 
                     if (fileComponentName) {
@@ -6030,7 +5799,7 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
             if (textKey && range.collapsed && range.startContainer === range.endContainer && util.isBreak(range.commonAncestorContainer)) {
                 const zeroWidth = util.createTextNode(util.zeroWidthSpace);
                 core.insertNode(zeroWidth, null, false);
-                core.setRange(zeroWidth, 1, zeroWidth, 1);
+                core.selection.setRange(zeroWidth, 1, zeroWidth, 1);
             }
 
             if (typeof functions.onKeyDown === 'function') functions.onKeyDown(e, core);
@@ -6038,13 +5807,13 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
 
         onKeyUp_wysiwyg: function (e) {
             if (event._onShortcutKey) return;
-            core._editorRange();
+            core.selection._editorRange();
 
-            const range = core.getRange();
+            const range = core.selection.getRange();
             const keyCode = e.keyCode;
             const ctrl = e.ctrlKey || e.metaKey || keyCode === 91 || keyCode === 92 || keyCode === 224;
             const alt = e.altKey;
-            let selectionNode = core.getSelectionNode();
+            let selectionNode = core.selection.getSelectionNode();
 
             if (core._isBalloon && ((core._isBalloonAlways && keyCode !== 27) || !range.collapsed)) {
                 if (core._isBalloonAlways) {
@@ -6066,7 +5835,7 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
                 oFormatTag.innerHTML = '<br>';
 
                 selectionNode.appendChild(oFormatTag);
-                core.setRange(oFormatTag, 0, oFormatTag, 0);
+                core.selection.setRange(oFormatTag, 0, oFormatTag, 0);
                 event._applyTagEffects();
 
                 core.history.push(false);
@@ -6077,7 +5846,7 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
             const rangeEl = util.getRangeFormatElement(selectionNode, null);
             if (((!formatEl && range.collapsed) || formatEl === rangeEl) && !util.isComponent(selectionNode)) {
                 core._setDefaultFormat(util.isRangeFormatElement(rangeEl) ? 'DIV' : 'P');
-                selectionNode = core.getSelectionNode();
+                selectionNode = core.selection.getSelectionNode();
             }
 
             if (event._directionKeyCode.test(keyCode)) {
@@ -6091,7 +5860,7 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
                 so = range.startOffset - frontZeroWidthCnt;
                 eo = range.endOffset - frontZeroWidthCnt;
                 selectionNode.textContent = selectionNode.textContent.replace(util.zeroWidthRegExp, '');
-                core.setRange(selectionNode, so < 0 ? 0 : so, selectionNode, eo < 0 ? 0 : eo);
+                core.selection.setRange(selectionNode, so < 0 ? 0 : so, selectionNode, eo < 0 ? 0 : eo);
             }
 
             core._charCount('');
@@ -6288,7 +6057,7 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
 
         // FireFox - table delete, Chrome - image, video, audio
         _hardDelete: function () {
-            const range = core.getRange();
+            const range = core.selection.getRange();
             const sc = range.startContainer;
             const ec = range.endContainer;
             
@@ -6304,7 +6073,7 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
                     util.removeItem(util.getParentElement(sCell, util.isComponent));
                 } else {
                     util.removeItem(util.getParentElement(sCell, util.isComponent));
-                    core.nativeFocus();
+                    core.selection.nativeFocus();
                     return true;
                 }
             }
@@ -6386,13 +6155,13 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
 
         _setDropLocationSelection: function (e) {
             if (e.rangeParent) {
-                core.setRange(e.rangeParent, e.rangeOffset, e.rangeParent, e.rangeOffset);
+                core.selection.setRange(e.rangeParent, e.rangeOffset, e.rangeParent, e.rangeOffset);
             } else if (core._wd.caretRangeFromPoint) {
                 const r = core._wd.caretRangeFromPoint(e.clientX, e.clientY);
-                core.setRange(r.startContainer, r.startOffset, r.endContainer, r.endOffset);
+                core.selection.setRange(r.startContainer, r.startOffset, r.endContainer, r.endOffset);
             } else {
-                const r = core.getRange();
-                core.setRange(r.startContainer, r.startOffset, r.endContainer, r.endOffset);
+                const r = core.selection.getRange();
+                core.selection.setRange(r.startContainer, r.startOffset, r.endContainer, r.endOffset);
             }
         },
 
@@ -6401,7 +6170,7 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
             if (util.isIE) {
                 plainText = data.getData('Text');
                 
-                const range = core.getRange();
+                const range = core.selection.getRange();
                 const tempDiv = util.createElement('DIV');
                 const tempRange = {
                     sc: range.startContainer,
@@ -6419,7 +6188,7 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
                 _w.setTimeout(function () {
                     cleanData = tempDiv.innerHTML;
                     util.removeItem(tempDiv);
-                    core.setRange(tempRange.sc, tempRange.so, tempRange.ec, tempRange.eo);
+                    core.selection.setRange(tempRange.sc, tempRange.so, tempRange.ec, tempRange.eo);
                     event._setClipboardData(type, e, plainText, cleanData, data);
                 });
 
@@ -6539,7 +6308,7 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
             core._variable._lineBreakComp = null;
 
             const focusEl = isList ? format : format.firstChild;
-            core.setRange(focusEl, 1, focusEl, 1);
+            core.selection.setRange(focusEl, 1, focusEl, 1);
             // history stack
             core.history.push(false);
         },
@@ -7128,7 +6897,7 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
 
             if (!core.initPlugins.image) core.callPlugin('image', core.plugins.image.submitAction.bind(core, files), null);
             else core.plugins.image.submitAction.call(core, files);
-            core.focus();
+            core.selection.focus();
         },
 
         /**
@@ -7159,7 +6928,7 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
                         a = c;
                     }
                     const offset = a.nodeType === 3 ? (t.endOffset || a.textContent.length): a.childNodes.length;
-                    core.setRange(a, offset, a, offset);
+                    core.selection.setRange(a, offset, a, offset);
                 } catch (error) {
                     core.execCommand('insertHTML', false, html);
                 }
@@ -7169,14 +6938,14 @@ export default function (context, pluginCallButtons, plugins, lang, options, _re
                 } else {
                     let afterNode = null;
                     if (util.isFormatElement(html) || util.isMedia(html)) {
-                        afterNode = util.getFormatElement(core.getSelectionNode(), null);	
+                        afterNode = util.getFormatElement(core.selection.getSelectionNode(), null);	
                     }
                     core.insertNode(html, afterNode, checkCharCount);
                 }
             }
             
             core.effectNode = null;
-            core.focus();
+            core.selection.focus();
 
             // history stack
             core.history.push(false);
